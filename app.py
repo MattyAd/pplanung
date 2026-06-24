@@ -503,28 +503,30 @@ def seite_stichtag():
     st.markdown('<div class="abschnitt">Stichtagssimulation</div>', unsafe_allow_html=True)
     st.caption("Wählen Sie ein beliebiges Datum – das System berechnet die Personalsituation aller Dienststellen.")
 
-    col_d, col_f = st.columns([2, 3])
-    with col_d:
+    # Filter-Zeile oben
+    col_a, col_b, col_c = st.columns([2, 2, 3])
+    with col_a:
         stichtag = st.date_input(
             "Stichtag",
             value=date.today() + timedelta(days=180),
             min_value=date(2020, 1, 1),
             max_value=date(2040, 12, 31),
         )
+    with col_b:
         typ_filter = st.multiselect(
-            "Typ filtern",
+            "Typ",
             ["Gericht", "Staatsanwaltschaft"],
             default=["Gericht", "Staatsanwaltschaft"],
         )
+    with col_c:
         region_filter = st.multiselect(
-            "Region filtern",
+            "Region",
             logik.alle_regionen(),
             default=[],
         )
 
+    # Berechnung
     besetzung = logik.berechne_besetzung_zum_stichtag(stichtag)
-
-    # Filter anwenden
     if typ_filter:
         besetzung = [b for b in besetzung if b["typ"] in typ_filter]
     if region_filter:
@@ -535,50 +537,47 @@ def seite_stichtag():
         return
 
     # Kennzahlen
-    with col_f:
-        gesamt_aka = sum(b["aka_summe"] for b in besetzung)
-        gesamt_bedarf = sum(b["pebby_bedarf"] for b in besetzung)
-        unterdeckt = sum(1 for b in besetzung if b["deckung"] < 0)
-        ueberdeckt = sum(1 for b in besetzung if b["deckung"] >= 0 and b["pebby_bedarf"] > 0)
+    gesamt_aka    = sum(b["aka_summe"]   for b in besetzung)
+    unterdeckt    = sum(1 for b in besetzung if b["deckung"] < 0)
+    ueberdeckt    = sum(1 for b in besetzung if b["deckung"] >= 0 and b["pebby_bedarf"] > 0)
 
-        cc = st.columns(4)
-        cc[0].metric("Dienststellen", len(besetzung))
-        cc[1].metric("AKA gesamt", f"{gesamt_aka:.1f}")
-        cc[2].metric("Unterdeckt", unterdeckt, delta=f"-{unterdeckt}", delta_color="inverse")
-        cc[3].metric("Ausreichend", ueberdeckt)
+    cc = st.columns(4)
+    cc[0].metric("Dienststellen", len(besetzung))
+    cc[1].metric("AKA gesamt",   f"{gesamt_aka:.1f}")
+    cc[2].metric("Unterdeckt",   unterdeckt)
+    cc[3].metric("Ausreichend",  ueberdeckt)
 
-    # Tabelle
+    # Tabelle – Styling über eine Hilfsspalte, kein .map() nötig
+    st.markdown('<div class="abschnitt">Besetzungstabelle</div>', unsafe_allow_html=True)
+
     rows = []
     for b in besetzung:
+        deckung = round(b["deckung"], 2)
+        if deckung >= 0:
+            ampel = "🟢"
+        elif deckung >= -2:
+            ampel = "🟡"
+        else:
+            ampel = "🔴"
         rows.append({
+            "": ampel,
             "Dienststelle": b["name"],
             "Typ": b["typ"],
             "Region": b["region"],
             "Personen": b["anzahl_personen"],
             "AKA": round(b["aka_summe"], 2),
             "PEBB§Y-Bedarf": b["pebby_bedarf"],
-            "Deckung": round(b["deckung"], 2),
+            "Deckung": deckung,
         })
+
     df = pd.DataFrame(rows)
-
-    st.markdown('<div class="abschnitt">Besetzungstabelle</div>', unsafe_allow_html=True)
-
-    def farbe_deckung(val):
-        if val >= 0:
-            return "color: #2E7D52; font-weight:bold"
-        elif val >= -2:
-            return "color: #E8A020; font-weight:bold"
-        else:
-            return "color: #C0392B; font-weight:bold"
-
-    styled = df.style.applymap(farbe_deckung, subset=["Deckung"])
-    st.dataframe(styled, use_container_width=True, hide_index=True)
+    st.dataframe(df, use_container_width=True, hide_index=True,
+                 column_config={"": st.column_config.TextColumn(width="small")})
 
     # Chart
     st.markdown('<div class="abschnitt">Visuelle Übersicht</div>', unsafe_allow_html=True)
-    df_chart = df.copy()
+    df_chart = df[["Dienststelle", "Deckung"]].copy().sort_values("Deckung")
     df_chart["Farbe"] = df_chart["Deckung"].apply(deckungsfarbe)
-    df_chart = df_chart.sort_values("Deckung")
 
     fig = px.bar(
         df_chart, x="Deckung", y="Dienststelle", orientation="h",
@@ -794,5 +793,4 @@ def main():
         seite_planung()
 
 
-if __name__ == "__main__":
-    main()
+main()
